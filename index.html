@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Critter Fusion 3D — Safari Overhaul</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #080b1a;
+      --bg2: #0b1021;
+      --panel: #141a34;
+      --panel2: #1a2247;
+      --panel3: rgba(255,255,255,0.04);
+      --ink: #e8ebff;
+      --muted: #b6bfda;
+      --accent: #8c7ae6;
+      --good: #39e18e;
+      --warn: #ffd166;
+      --bad: #ff5d5d;
+      --scan: #39b9ff;
+    }
+    body {
+      margin: 0;
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      color: var(--ink);
+      background: radial-gradient(1200px 800px at 70% -10%, #12183b 0%, #0a0e1f 45%, #070a15 100%);
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015)), var(--panel);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 16px;
+    }
+    .btn {
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px;
+      padding: 0.55rem 0.9rem;
+      font-weight: 700;
+      color: var(--ink);
+      background: linear-gradient(180deg, #272d4e, #181d36);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .btn:not(:disabled):hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 22px rgba(9,12,32,0.45);
+    }
+    .btn-primary {
+      background: linear-gradient(180deg, #5b56cc, #3a3691);
+    }
+    .btn-ghost {
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    }
+    .btn-danger {
+      background: linear-gradient(180deg, #a13a3a, #752222);
+      color: #ffeaea;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(6, 8, 18, 0.85);
+      backdrop-filter: blur(5px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+      padding: 1.5rem;
+    }
+    .tab-btn {
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(20,26,52,0.6);
+      padding: 0.4rem 0.85rem;
+      font-weight: 600;
+      color: #cbd3ff;
+    }
+    .tab-btn.active {
+      background: linear-gradient(180deg, #5b56cc, #3a3691);
+      color: white;
+      border-color: rgba(255,255,255,0.12);
+    }
+    .meter {
+      position: relative;
+      height: 12px;
+      background: rgba(6, 10, 24, 0.7);
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      overflow: hidden;
+    }
+    .meter > i {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, #5b56cc, #6c67e8, #9a7bf0);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    .collection-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.75rem;
+    }
+    .collection-card {
+      background: linear-gradient(180deg, rgba(14, 20, 46, 0.96), rgba(9, 14, 30, 0.96));
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 0.85rem;
+      display: flex;
+      gap: 0.85rem;
+      align-items: center;
+      min-height: 96px;
+    }
+    .collection-thumb {
+      width: 72px;
+      height: 72px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(8,11,26,0.92);
+    }
+    .gizmo-screen {
+      background: #061324;
+      border-radius: 12px;
+      border: 1px solid rgba(57, 185, 255, 0.35);
+    }
+    #three-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+    const TILE_SIZE = 2;
+    const MAP_W = 22;
+    const MAP_H = 22;
+    const TILE_TYPE = { WALL: 0, FLOOR: 1, QBIT: 2, ENEMY: 3, EXIT: 4 };
+    const SAFARI_LOCATIONS = {
+      Forest: { req: 1, blurb: "Organic, Bug, Mystic", colors: { wall: '#223047', floor: '#4a9a57', accent: '#9fe39c' } },
+      Cave: { req: 2, blurb: "Elemental, Gemstone", colors: { wall: '#401912', floor: '#5d748b', accent: '#ff9b73' } },
+      Beach: { req: 3, blurb: "Aquatic, Bird", colors: { wall: '#133a56', floor: '#3d7898', accent: '#8ce0ff' } },
+      Urban: { req: 4, blurb: "Mechanical, Robot", colors: { wall: '#4a4a4a', floor: '#8a8a8a', accent: '#f0f0f0' } },
+    };
+
+    const XP_THRESHOLDS = { 1: 0, 2: 120, 3: 320, 4: 620, 5: 1100 };
+    const SPLICING_COST = 20;
+    const ENHANCE_CAP = 30;
+    const MAX_SPLICES = 3;
+    const POWER_CAP = 240;
+    const MARKET_COST = 60;
+    const SCAN_COST = 5;
+    const SCAN_RADIUS = 2;
+
+    const STARTER_CRITTERS = [
+      { name: "Voltlet", type: "Electric", power: 100 },
+      { name: "Glimbug", type: "Organic", power: 95 },
+      { name: "Aqualis", type: "Aquatic", power: 102 },
+    ];
+
+    const RANDOM_NAMES = ["Zintle", "Korbi", "Arclume", "Sunwisp", "Voltlet", "Myrmist", "Nyx", "Talos", "Zephyx", "Aurion"];
+    const RANDOM_TYPES = ["Elemental", "Organic", "Mystic", "Mechanical", "Aquatic", "Psychic", "Cosmic", "Gemstone"];
+
+    const levelFromXP = (xp) => {
+      let lvl = 1;
+      for (const k of Object.keys(XP_THRESHOLDS).map(Number).sort((a, b) => a - b)) {
+        if (xp >= XP_THRESHOLDS[k]) lvl = k; else break;
+      }
+      return lvl;
+    };
+
+    const rnd = (n) => Math.floor(Math.random() * n);
+
+    const randomPalette = () => {
+      const palettes = [
+        ["#d9dcff", "#8c7ae6", "#ffffff"],
+        ["#ffcf9b", "#ff7a59", "#2b1f1a"],
+        ["#b6ffd6", "#49e692", "#0d3021"],
+        ["#b1e5ff", "#4fd3ff", "#06202b"],
+        ["#ffd6f9", "#ff79c6", "#2b0f26"],
+        ["#ffe5a0", "#ffd166", "#2d2312"],
+      ];
+      return palettes[rnd(palettes.length)];
+    };
+
+    const randomSkin = () => {
+      const palette = randomPalette();
+      const shapes = ["orb", "tri", "bug", "bot"];
+      return {
+        base: palette[0],
+        accent: palette[1],
+        eye: palette[2],
+        shape: shapes[rnd(shapes.length)],
+        seed: Math.floor(Math.random() * 1e9),
+      };
+    };
+
+    const ensureSkin = (critter) => {
+      if (!critter.skin) {
+        critter.skin = randomSkin();
+      }
+      return critter;
+    };
+
+    const randomCritter = (env = "Forest") => {
+      const pool = SAFARI_LOCATIONS[env].blurb.split(', ').map(t => t.trim());
+      const type = pool[rnd(pool.length)];
+      const power = 50 + rnd(70);
+      return ensureSkin({
+        id: crypto.randomUUID(),
+        name: RANDOM_NAMES[rnd(RANDOM_NAMES.length)],
+        type,
+        power,
+        hp: power,
+        hpMax: power,
+        tier: 0,
+        desc: `A wild ${type} critter native to ${env}.`,
+      });
+    };
+
+    const mixHex = (a, b, t) => {
+      const ah = parseInt(a.slice(1), 16);
+      const bh = parseInt(b.slice(1), 16);
+      const ar = (ah >> 16) & 255, ag = (ah >> 8) & 255, ab = ah & 255;
+      const br = (bh >> 16) & 255, bg = (bh >> 8) & 255, bb = bh & 255;
+      const r = Math.round(ar + (br - ar) * t);
+      const g = Math.round(ag + (bg - ag) * t);
+      const bl = Math.round(ab + (bb - ab) * t);
+      return `#${((r << 16) | (g << 8) | bl).toString(16).padStart(6, '0')}`;
+    };
+
+    const blendName = (a, b) => {
+      const cut1 = Math.max(2, Math.min(5, Math.floor(a.length / 2)));
+      const cut2 = Math.max(2, Math.min(5, Math.floor(b.length / 2)));
+      const glue = ['', 'a', 'o', 'e', '-'][rnd(5)];
+      return (a.slice(0, cut1) + glue + b.slice(-cut2)).replace(/[^a-zA-Z-]/g, '');
+    };
+
+    const makeChild = (parentA, parentB, invest = 0) => {
+      const base = Math.max(parentA.power, parentB.power);
+      const bonus = Math.round((parentA.power + parentB.power) / 4 + Math.random() * Math.max(10, base * 0.35));
+      const boostPct = Math.min(ENHANCE_CAP, invest);
+      const boosted = Math.round((base + bonus) * (1 + boostPct / 100));
+      const power = Math.min(POWER_CAP, Math.max(base + 10, boosted));
+      const tier = Math.min(MAX_SPLICES, Math.max(parentA.tier || 0, parentB.tier || 0) + 1);
+      const type = parentA.type === parentB.type ? parentA.type : `${parentA.type}-${parentB.type}`;
+      const t = Math.random();
+      const skin = {
+        base: mixHex(parentA.skin.base, parentB.skin.base, t),
+        accent: mixHex(parentA.skin.accent, parentB.skin.accent, 1 - t),
+        eye: mixHex(parentA.skin.eye, parentB.skin.eye, 0.5),
+        shape: Math.random() < 0.5 ? parentA.skin.shape : parentB.skin.shape,
+        seed: Math.floor(Math.random() * 1e9),
+      };
+      return ensureSkin({
+        id: crypto.randomUUID(),
+        name: blendName(parentA.name, parentB.name),
+        type,
+        power,
+        hp: power,
+        hpMax: power,
+        tier,
+        desc: `Forged from ${parentA.name} and ${parentB.name}.`,
+        splicesUsed: (parentA.splicesUsed || 0) + (parentB.splicesUsed || 0) + 1,
+        skin,
+      });
+    };
+
+    const generateMap = () => {
+      const map = Array.from({ length: MAP_H }, () => Array(MAP_W).fill(TILE_TYPE.WALL));
+      const revealed = Array.from({ length: MAP_H }, () => Array(MAP_W).fill(false));
+      let x = Math.floor(MAP_W / 2), y = Math.floor(MAP_H / 2);
+      let floors = 0;
+      const target = Math.floor(MAP_W * MAP_H * 0.42);
+      while (floors < target) {
+        if (map[y][x] === TILE_TYPE.WALL) {
+          map[y][x] = TILE_TYPE.FLOOR;
+          floors++;
+        }
+        const d = rnd(4);
+        if (d === 0 && y > 1) y--;
+        else if (d === 1 && y < MAP_H - 2) y++;
+        else if (d === 2 && x > 1) x--;
+        else if (d === 3 && x < MAP_W - 2) x++;
+      }
+      let px, py;
+      do { px = rnd(MAP_W); py = rnd(MAP_H); } while (map[py][px] !== TILE_TYPE.FLOOR);
+      const placeFeature = (type, count) => {
+        for (let i = 0; i < count; i++) {
+          let fx, fy;
+          do { fx = rnd(MAP_W); fy = rnd(MAP_H); } while (map[fy][fx] !== TILE_TYPE.FLOOR);
+          map[fy][fx] = type;
+        }
+      };
+      let ex, ey, tries = 0;
+      do {
+        ex = rnd(MAP_W); ey = rnd(MAP_H); tries++;
+        if (tries > 500) break;
+      } while (map[ey][ex] !== TILE_TYPE.FLOOR || Math.abs(ex - px) + Math.abs(ey - py) < 8);
+      map[ey][ex] = TILE_TYPE.EXIT;
+      placeFeature(TILE_TYPE.QBIT, 8 + rnd(5));
+      placeFeature(TILE_TYPE.ENEMY, 7 + rnd(6));
+      return { map, revealed, playerPos: { x: px, y: py } };
+    };
+
+    const TouchControls = ({ onMove }) => {
+      const buttonClass = "absolute bg-white/15 backdrop-blur-sm border border-white/15 rounded-full w-12 h-12 flex items-center justify-center text-white text-2xl font-bold active:bg-white/40 select-none";
+      return (
+        <div className="lg:hidden absolute bottom-5 right-5 grid grid-cols-3 grid-rows-3 w-40 h-40 z-10">
+          <button onClick={() => onMove(0, -1)} className={`${buttonClass} col-start-2 row-start-1`}>↑</button>
+          <button onClick={() => onMove(-1, 0)} className={`${buttonClass} col-start-1 row-start-2`}>←</button>
+          <button onClick={() => onMove(1, 0)} className={`${buttonClass} col-start-3 row-start-2`}>→</button>
+          <button onClick={() => onMove(0, 1)} className={`${buttonClass} col-start-2 row-start-3`}>↓</button>
+        </div>
+      );
+    };
+
+    const Meter = ({ ratio, color }) => (
+      <div className="meter">
+        <i style={{ width: `${Math.max(0, Math.min(1, ratio)) * 100}%`, background: color || undefined }}></i>
+      </div>
+    );
+
+    const Pill = ({ label, value }) => (
+      <div className="px-3 py-1.5 rounded-xl border border-white/10 bg-[var(--panel2)] text-sm font-semibold whitespace-nowrap">
+        <span className="text-[var(--muted)] mr-1.5">{label}:</span>
+        <span className="text-sky-200">{value}</span>
+      </div>
+    );
+
+    const ThreeCanvas = ({ gameState }) => {
+      const mountRef = useRef(null);
+      const cacheRef = useRef({ scene: null, renderer: null, camera: null, meshes: [] });
+
+      useEffect(() => {
+        const mount = mountRef.current;
+        const width = mount.clientWidth;
+        const height = mount.clientHeight;
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        mount.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(-5, 10, 7.5);
+        directionalLight.castShadow = true;
+        scene.add(ambientLight);
+        scene.add(directionalLight);
+
+        const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x39e18e, emissive: 0x39e18e, emissiveIntensity: 0.6 });
+        const enemyMaterial = new THREE.MeshStandardMaterial({ color: 0xff5d5d, transparent: true, opacity: 0.85 });
+        const revealedEnemyMaterial = new THREE.MeshStandardMaterial({ color: 0xff5d5d, emissive: 0xff5d5d, emissiveIntensity: 0.45 });
+        const qbitMaterial = new THREE.MeshStandardMaterial({ color: 0x39b9ff, emissive: 0x39b9ff, emissiveIntensity: 0.65 });
+        const exitMaterial = new THREE.MeshStandardMaterial({ color: 0xffd166, emissive: 0xffd166, emissiveIntensity: 0.75 });
+        const labFloorMaterial = new THREE.MeshStandardMaterial({ color: 0x1a2247 });
+
+        const playerGeo = new THREE.ConeGeometry(0.4 * TILE_SIZE / 2, TILE_SIZE, 10);
+        const enemyGeo = new THREE.BoxGeometry(0.7 * TILE_SIZE, 0.7 * TILE_SIZE, 0.7 * TILE_SIZE);
+        const qbitGeo = new THREE.SphereGeometry(0.3 * TILE_SIZE / 2, 12, 12);
+        const exitGeo = new THREE.TorusGeometry(0.55 * TILE_SIZE / 2, 0.15 * TILE_SIZE / 2, 10, 32);
+        exitGeo.rotateX(Math.PI / 2);
+
+        const playerMesh = new THREE.Mesh(playerGeo, playerMaterial);
+        playerMesh.castShadow = true;
+        scene.add(playerMesh);
+
+        const buildSafariScene = (state) => {
+          scene.clear();
+          scene.add(ambientLight);
+          scene.add(directionalLight);
+          scene.add(playerMesh);
+          const meshes = [];
+          const { map, revealed, location } = state;
+          const colors = SAFARI_LOCATIONS[location].colors;
+          const wallMaterial = new THREE.MeshStandardMaterial({ color: colors.wall });
+          const floorMaterial = new THREE.MeshStandardMaterial({ color: colors.floor });
+          scene.fog = new THREE.Fog(0x050714, TILE_SIZE * 10, TILE_SIZE * 40);
+          for (let y = 0; y < MAP_H; y++) {
+            for (let x = 0; x < MAP_W; x++) {
+              const pos = { x: (x - MAP_W / 2) * TILE_SIZE, y: 0, z: (y - MAP_H / 2) * TILE_SIZE };
+              const tileType = map[y][x];
+              if (tileType === TILE_TYPE.WALL) {
+                const wallGeo = new THREE.BoxGeometry(TILE_SIZE, TILE_SIZE * 1.4, TILE_SIZE);
+                const wallMesh = new THREE.Mesh(wallGeo, wallMaterial);
+                wallMesh.position.set(pos.x, TILE_SIZE * 0.7, pos.z);
+                wallMesh.receiveShadow = true;
+                wallMesh.castShadow = true;
+                scene.add(wallMesh);
+                meshes.push(wallMesh);
+              } else {
+                const floorGeo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
+                const floorMesh = new THREE.Mesh(floorGeo, floorMaterial);
+                floorMesh.rotation.x = -Math.PI / 2;
+                floorMesh.position.set(pos.x, 0, pos.z);
+                floorMesh.receiveShadow = true;
+                scene.add(floorMesh);
+                meshes.push(floorMesh);
+                let featureMesh = null;
+                if (tileType === TILE_TYPE.ENEMY) {
+                  featureMesh = new THREE.Mesh(enemyGeo, revealed[y][x] ? revealedEnemyMaterial : enemyMaterial);
+                  featureMesh.position.set(pos.x, TILE_SIZE / 2, pos.z);
+                } else if (tileType === TILE_TYPE.QBIT) {
+                  featureMesh = new THREE.Mesh(qbitGeo, qbitMaterial);
+                  featureMesh.position.set(pos.x, TILE_SIZE / 2, pos.z);
+                } else if (tileType === TILE_TYPE.EXIT) {
+                  featureMesh = new THREE.Mesh(exitGeo, exitMaterial);
+                  featureMesh.position.set(pos.x, 0.1, pos.z);
+                }
+                if (featureMesh) {
+                  featureMesh.castShadow = true;
+                  scene.add(featureMesh);
+                  meshes.push(featureMesh);
+                }
+              }
+            }
+          }
+          cacheRef.current.meshes = meshes;
+        };
+
+        const buildLabScene = () => {
+          scene.clear();
+          scene.add(ambientLight);
+          scene.add(directionalLight);
+          scene.fog = null;
+          const floorGeo = new THREE.PlaneGeometry(50, 50);
+          const floor = new THREE.Mesh(floorGeo, labFloorMaterial);
+          floor.rotation.x = -Math.PI / 2;
+          scene.add(floor);
+          const podGeo = new THREE.CylinderGeometry(1.2, 1.2, 4.2, 16);
+          const emissives = [0x8c7ae6, 0x39e18e, 0xffd166];
+          for (let i = 0; i < 6; i++) {
+            const podMat = new THREE.MeshStandardMaterial({ color: 0x192040, emissive: emissives[i % emissives.length], emissiveIntensity: 0.25 });
+            const pod = new THREE.Mesh(podGeo, podMat);
+            const angle = (i / 6) * Math.PI * 2;
+            pod.position.set(Math.cos(angle) * 10, 2.1, Math.sin(angle) * 10);
+            pod.castShadow = true;
+            scene.add(pod);
+          }
+          cacheRef.current.meshes = [];
+        };
+
+        cacheRef.current.scene = scene;
+        cacheRef.current.renderer = renderer;
+        cacheRef.current.camera = camera;
+        cacheRef.current.playerMesh = playerMesh;
+        cacheRef.current.buildSafariScene = buildSafariScene;
+        cacheRef.current.buildLabScene = buildLabScene;
+
+        const handleResize = () => {
+          const width = mount.clientWidth;
+          const height = mount.clientHeight;
+          renderer.setSize(width, height);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+          window.removeEventListener('resize', handleResize);
+          cancelAnimationFrame(cacheRef.current.frameId);
+          renderer.dispose();
+          mount.removeChild(renderer.domElement);
+        };
+      }, []);
+
+      useEffect(() => {
+        const { scene, renderer, camera, playerMesh, buildSafariScene, buildLabScene } = cacheRef.current;
+        if (!scene || !renderer || !camera) return;
+        if (gameState.inSafari) {
+          buildSafariScene(gameState);
+        } else {
+          buildLabScene();
+        }
+
+        const animate = () => {
+          if (!scene) return;
+          const { playerPos } = gameState;
+          if (gameState.inSafari && playerPos) {
+            const targetPos = new THREE.Vector3((playerPos.x - MAP_W / 2) * TILE_SIZE, TILE_SIZE / 2, (playerPos.y - MAP_H / 2) * TILE_SIZE);
+            playerMesh.position.lerp(targetPos, 0.2);
+            camera.position.lerp(new THREE.Vector3(targetPos.x, TILE_SIZE * 8, targetPos.z + TILE_SIZE * 5), 0.08);
+            camera.lookAt(targetPos.x, 0, targetPos.z);
+          } else {
+            camera.position.set(0, 15, 20);
+            camera.lookAt(0, 0, 0);
+          }
+          cacheRef.current.meshes.forEach(mesh => {
+            if (mesh.geometry instanceof THREE.TorusGeometry || mesh.geometry instanceof THREE.SphereGeometry) {
+              mesh.rotation.y += 0.01;
+            }
+          });
+          renderer.render(scene, camera);
+          cacheRef.current.frameId = requestAnimationFrame(animate);
+        };
+        animate();
+      }, [gameState]);
+
+      return <div ref={mountRef} className="w-full h-full" />;
+    };
+
+    const CritterThumb = ({ critter }) => {
+      const canvasRef = useRef(null);
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 72 * dpr;
+        canvas.height = 72 * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, 72, 72);
+        const { base, accent, eye, shape } = critter.skin;
+        ctx.save();
+        ctx.translate(36, 40);
+        ctx.shadowColor = accent;
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = base;
+        if (shape === 'orb') {
+          ctx.beginPath(); ctx.arc(0, -6, 24, 0, Math.PI * 2); ctx.fill();
+        } else if (shape === 'tri') {
+          ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(-22, 16); ctx.lineTo(22, 16); ctx.closePath(); ctx.fill();
+        } else if (shape === 'bug') {
+          ctx.beginPath(); ctx.ellipse(0, -4, 20, 28, 0, 0, Math.PI * 2); ctx.fill();
+        } else {
+          ctx.fillRect(-22, -26, 44, 48);
+        }
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = accent;
+        ctx.fillRect(-24, 6, 48, 5);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = eye;
+        ctx.beginPath(); ctx.arc(-10, -6, 4.5, 0, Math.PI * 2); ctx.arc(10, -6, 4.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }, [critter]);
+      return <canvas ref={canvasRef} className="collection-thumb"></canvas>;
+    };
+
+    const GizmoScanner = ({ qbits, onScan, map, revealed, playerPos, lastScan }) => {
+      const canvasRef = useRef(null);
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = '#39b9ff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(6, 6, w - 12, h - 12);
+        ctx.strokeStyle = 'rgba(200,255,70,.8)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(w / 2, 10); ctx.lineTo(w / 2, h - 10); ctx.moveTo(10, h / 2); ctx.lineTo(w - 10, h / 2); ctx.stroke();
+        const cx = w / 2, cy = h / 2;
+        ctx.strokeStyle = 'rgba(200,255,70,.45)';
+        [18, 32, 46].forEach(r => { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); });
+        if (!map) return;
+        for (let dy = -SCAN_RADIUS; dy <= SCAN_RADIUS; dy++) {
+          for (let dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
+            const x = playerPos.x + dx;
+            const y = playerPos.y + dy;
+            if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H && map[y][x] === TILE_TYPE.ENEMY) {
+              const bx = cx + dx * 10;
+              const by = cy + dy * 10;
+              const vis = revealed[y][x];
+              ctx.fillStyle = vis ? '#ff5757' : '#7a2633';
+              ctx.beginPath(); ctx.arc(bx, by, 4, 0, Math.PI * 2); ctx.fill();
+            }
+          }
+        }
+        if (lastScan && Date.now() - lastScan < 600) {
+          ctx.fillStyle = 'rgba(57,185,255,0.12)';
+          ctx.beginPath(); ctx.arc(cx, cy, (Date.now() - lastScan) / 4 + 30, 0, Math.PI * 2); ctx.fill();
+        }
+      }, [map, revealed, playerPos, lastScan]);
+
+      return (
+        <div className="card p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-extrabold text-[var(--scan)]">Gizmo Scanner</h3>
+            <span className="text-sm text-[var(--muted)]">Q-bits: {qbits}</span>
+          </div>
+          <div className="border-2 border-[var(--scan)]/80 rounded-2xl p-2">
+            <canvas ref={canvasRef} className="gizmo-screen w-full h-36"></canvas>
+          </div>
+          <button onClick={onScan} disabled={qbits < SCAN_COST} className="btn btn-primary w-full">
+            Scan ({SCAN_COST} Q-bits)
+          </button>
+          <p className="text-xs text-[var(--muted)] text-center">Reveals critters in a {(SCAN_RADIUS * 2 + 1)}×{(SCAN_RADIUS * 2 + 1)} area. Revealed critters can be battled.</p>
+        </div>
+      );
+    };
+
+    const LogPanel = ({ log }) => (
+      <div className="card p-4 h-full flex flex-col">
+        <h3 className="text-xl font-bold text-[var(--accent)] mb-2">Activity Feed</h3>
+        <div className="text-sm text-[var(--muted)] space-y-2 overflow-y-auto flex-1 pr-1">
+          {log.map((entry, idx) => (
+            <p key={idx} className="leading-snug">{entry}</p>
+          ))}
+        </div>
+      </div>
+    );
+
+    const ModalFrame = ({ title, onClose, children, width = 'min(96vw, 980px)' }) => (
+      <div className="modal">
+        <div className="card p-6" style={{ width, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-black text-[var(--ink)]">{title}</h2>
+            <button className="btn btn-ghost" onClick={onClose}>Close</button>
+          </div>
+          <div className="overflow-y-auto pr-1" style={{ flex: 1 }}>
+            {children}
+          </div>
+        </div>
+      </div>
+    );
+
+    const SafariSelectModal = ({ level, onPick, onClose }) => (
+      <ModalFrame title="Choose Safari Destination" onClose={onClose}>
+        <p className="text-sm text-[var(--muted)] mb-4">Destinations unlock as you level up. Each biome features different critter families.</p>
+        <div className="grid sm:grid-cols-2 gap-4">
+          {Object.entries(SAFARI_LOCATIONS).map(([name, loc]) => {
+            const locked = level < loc.req;
+            return (
+              <button
+                key={name}
+                disabled={locked}
+                onClick={() => onPick(name)}
+                className={`card text-left p-4 transition ${locked ? 'opacity-50 cursor-not-allowed' : 'hover:ring-2 hover:ring-[var(--accent)]'}`}
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-extrabold">{name}</h3>
+                  <span className="text-xs text-[var(--muted)]">Lv {loc.req}+</span>
+                </div>
+                <div className="text-sm text-[var(--muted)] mt-2">Critters: {loc.blurb}</div>
+              </button>
+            );
+          })}
+        </div>
+      </ModalFrame>
+    );
+
+    const CollectionModal = ({ collection, leadId, onSetLead, onSplice, player, onClose }) => {
+      const [tab, setTab] = useState('collection');
+      const [parentA, setParentA] = useState('');
+      const [parentB, setParentB] = useState('');
+      const [invest, setInvest] = useState(0);
+
+      const parentAObj = collection.find(c => c.id === parentA);
+      const parentBObj = collection.find(c => c.id === parentB);
+      const investMax = Math.max(0, Math.min(ENHANCE_CAP, player.qbits - SPLICING_COST));
+      useEffect(() => {
+        if (invest > investMax) setInvest(investMax);
+      }, [investMax]);
+
+      const canSplice = parentAObj && parentBObj && parentA !== parentB && player.qbits >= (SPLICING_COST + invest);
+
+      return (
+        <ModalFrame title="Collection & Splicing" onClose={onClose}>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button className={`tab-btn ${tab === 'collection' ? 'active' : ''}`} onClick={() => setTab('collection')}>Collection</button>
+            <button className={`tab-btn ${tab === 'splice' ? 'active' : ''}`} onClick={() => setTab('splice')}>Splice Lab</button>
+          </div>
+          {tab === 'collection' ? (
+            <div className="space-y-4">
+              <p className="text-sm text-[var(--muted)]">Select a lead to take on safari. Lead HP persists between battles and fully recovers when you clear a safari floor.</p>
+              <div className="collection-grid">
+                {collection.length === 0 && (
+                  <div className="text-sm text-[var(--muted)] col-span-full">No critters yet. Win battles to capture new specimens.</div>
+                )}
+                {collection.map(critter => (
+                  <div key={critter.id} className="collection-card">
+                    <CritterThumb critter={critter} />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-lg">{critter.name}</h3>
+                        <span className="px-2 py-1 text-xs rounded-md bg-white/10 text-[var(--muted)]">{critter.type}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--muted)] flex flex-wrap gap-2">
+                        <span>Power: <strong>{critter.power}</strong></span>
+                        <span>HP: <strong>{critter.hp ?? critter.hpMax}</strong> / {critter.hpMax}</span>
+                        <span>Splices: <strong>{critter.tier || 0}</strong> / {MAX_SPLICES}</span>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button className="btn btn-primary text-sm" onClick={() => onSetLead(critter.id)} disabled={leadId === critter.id}>
+                          {leadId === critter.id ? 'Lead Selected' : 'Set as Lead'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs uppercase tracking-wide text-[var(--muted)]">Parent A</label>
+                  <select className="mt-1 w-full bg-[#0c1230] border border-white/10 rounded-xl px-3 py-2 text-sm" value={parentA} onChange={e => setParentA(e.target.value)}>
+                    <option value="">— choose —</option>
+                    {collection.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} (P{c.power})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-wide text-[var(--muted)]">Parent B</label>
+                  <select className="mt-1 w-full bg-[#0c1230] border border-white/10 rounded-xl px-3 py-2 text-sm" value={parentB} onChange={e => setParentB(e.target.value)}>
+                    <option value="">— choose —</option>
+                    {collection.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} (P{c.power})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-[var(--muted)]">Enhance with Q-bits (boost up to +30%)</label>
+                <input type="range" min="0" max={investMax} value={invest} onChange={e => setInvest(Number(e.target.value))} className="w-full" />
+                <div className="text-xs text-[var(--muted)] flex justify-between mt-1">
+                  <span>Invest: {invest} Q-bits</span>
+                  <span>Total Cost: {SPLICING_COST + invest}</span>
+                </div>
+              </div>
+              <div className="text-sm text-[var(--muted)]">
+                {canSplice ? 'Ready. Splicing consumes both parents and creates a new critter with boosted stats.' : 'Pick two different parents and ensure you have enough Q-bits.'}
+              </div>
+              <button className="btn btn-primary w-full" disabled={!canSplice} onClick={() => {
+                onSplice(parentAObj, parentBObj, invest);
+                setParentA('');
+                setParentB('');
+                setInvest(0);
+              }}>Splice!</button>
+            </div>
+          )}
+        </ModalFrame>
+      );
+    };
+
+    const MarketModal = ({ player, onBuy, preview, onClose }) => (
+      <ModalFrame title="Q-bit Market" onClose={onClose}>
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--muted)]">Spend Q-bits to purchase specially bred critters. Unlocks at level 3.</p>
+          <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 inline-flex gap-3 text-sm">
+            <span>Wallet: <strong>{player.qbits}</strong> Q-bits</span>
+            <span>Level: <strong>{levelFromXP(player.xp)}</strong></span>
+          </div>
+          {levelFromXP(player.xp) < 3 ? (
+            <div className="text-sm text-[var(--muted)]">Reach Level 3 to browse the market.</div>
+          ) : (
+            <div className="card p-4 space-y-3">
+              <div className="flex gap-4 items-center">
+                <CritterThumb critter={preview} />
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-[var(--muted)] mb-1">Featured Specimen</div>
+                  <h3 className="text-xl font-extrabold">{preview.name}</h3>
+                  <div className="text-sm text-[var(--muted)]">Type: {preview.type} • Power: {preview.power}</div>
+                  <div className="text-xs text-[var(--muted)] mt-1">{preview.desc}</div>
+                </div>
+              </div>
+              <button className="btn btn-primary w-full" disabled={player.qbits < MARKET_COST} onClick={() => onBuy(preview)}>Buy for {MARKET_COST} Q-bits</button>
+            </div>
+          )}
+        </div>
+      </ModalFrame>
+    );
+
+    const BattleModal = ({ battle, onAttack, onRun, onClose }) => {
+      const { lead, wild, message } = battle;
+      const leadHpRatio = lead.hp / lead.hpMax;
+      const wildHpRatio = wild.hp / wild.hpMax;
+      return (
+        <ModalFrame title="Battle!" onClose={onClose} width="min(96vw, 720px)">
+          <div className="space-y-6">
+            <div className="card p-4 grid md:grid-cols-2 gap-4 items-center">
+              <div className="flex flex-col items-center gap-2">
+                <div className="text-sm text-[var(--muted)]">Lead</div>
+                <CritterThumb critter={lead} />
+                <div className="w-full">
+                  <div className="text-xs text-[var(--muted)] mb-1">HP {Math.max(0, Math.round(lead.hp))} / {lead.hpMax}</div>
+                  <Meter ratio={leadHpRatio} color={leadHpRatio > 0.5 ? 'linear-gradient(90deg,#39e18e,#50f2a4)' : leadHpRatio > 0.25 ? 'linear-gradient(90deg,#ffd166,#ffb347)' : 'linear-gradient(90deg,#ff5d5d,#ff8888)'} />
+                </div>
+              </div>
+              <div className="flex flex-col items-center gap-2">
+                <div className="text-sm text-[var(--muted)]">Wild {wild.type}</div>
+                <CritterThumb critter={wild} />
+                <div className="w-full">
+                  <div className="text-xs text-[var(--muted)] mb-1">HP {Math.max(0, Math.round(wild.hp))} / {wild.hpMax}</div>
+                  <Meter ratio={wildHpRatio} color={wildHpRatio > 0.5 ? 'linear-gradient(90deg,#39e18e,#50f2a4)' : wildHpRatio > 0.25 ? 'linear-gradient(90deg,#ffd166,#ffb347)' : 'linear-gradient(90deg,#ff5d5d,#ff8888)'} />
+                </div>
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <button className="btn btn-primary" onClick={onAttack}>Attack</button>
+              <button className="btn btn-ghost" onClick={onRun}>Attempt Escape</button>
+            </div>
+            <div className="text-sm text-[var(--muted)] text-center min-h-[2.5rem]">{message}</div>
+          </div>
+        </ModalFrame>
+      );
+    };
+
+    const PlayerHUD = ({ player, lead, collectionSize }) => {
+      const level = levelFromXP(player.xp);
+      const nextLevelXP = XP_THRESHOLDS[level + 1] || XP_THRESHOLDS[level];
+      const currentLevelXP = XP_THRESHOLDS[level];
+      const xpRatio = nextLevelXP === currentLevelXP ? 1 : (player.xp - currentLevelXP) / (nextLevelXP - currentLevelXP);
+      return (
+        <div className="card p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-black text-[var(--accent)]">Player Status</h2>
+            <span className="text-xs text-[var(--muted)]">Collection: {collectionSize}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Pill label="Q-bits" value={player.qbits} />
+            <Pill label="Level" value={level} />
+          </div>
+          <div>
+            <div className="text-xs text-[var(--muted)] mb-1">XP Progress</div>
+            <Meter ratio={xpRatio} />
+            <div className="text-xs text-right text-[var(--muted)] mt-1">{player.xp} / {nextLevelXP} XP</div>
+          </div>
+          <div className="border-t border-white/10 pt-4">
+            <h3 className="text-lg font-extrabold text-[var(--accent)] mb-1">Lead Critter</h3>
+            {lead ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <CritterThumb critter={lead} />
+                  <div>
+                    <div className="font-semibold text-lg">{lead.name}</div>
+                    <div className="text-xs text-[var(--muted)]">{lead.type}</div>
+                  </div>
+                </div>
+                <div className="text-xs text-[var(--muted)]">HP {Math.max(0, Math.round(lead.hp))} / {lead.hpMax}</div>
+                <Meter ratio={lead.hp / lead.hpMax} color={lead.hp / lead.hpMax > 0.5 ? 'linear-gradient(90deg,#39e18e,#50f2a4)' : lead.hp / lead.hpMax > 0.25 ? 'linear-gradient(90deg,#ffd166,#ffb347)' : 'linear-gradient(90deg,#ff5d5d,#ff8888)'} />
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--muted)]">No lead selected. Acquire critters and choose one in the collection.</div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => {
+      const [player, setPlayer] = useState({ qbits: 80, xp: 0 });
+      const [collection, setCollection] = useState(() => STARTER_CRITTERS.map(starter => ensureSkin({
+        id: crypto.randomUUID(),
+        name: starter.name,
+        type: starter.type,
+        power: starter.power,
+        hp: starter.power,
+        hpMax: starter.power,
+        tier: 0,
+        desc: 'Starter companion.'
+      })));
+      const [leadId, setLeadId] = useState(null);
+      const [log, setLog] = useState(["Welcome to the upgraded Critter Fusion Safari."]);
+      const [modal, setModal] = useState(null);
+      const [marketPreview, setMarketPreview] = useState(() => ensureSkin({
+        id: crypto.randomUUID(),
+        name: 'Aurion',
+        type: 'Cosmic',
+        power: 140,
+        hp: 140,
+        hpMax: 140,
+        tier: 0,
+        desc: 'Market-bred rare specimen from the Orion cluster.'
+      }));
+      const [battleState, setBattleState] = useState(null);
+      const [lastScan, setLastScan] = useState(null);
+      const [gameState, setGameState] = useState({ inSafari: false, location: null, map: null, revealed: null, playerPos: { x: 0, y: 0 } });
+
+      const lead = useMemo(() => {
+        if (leadId) {
+          return collection.find(c => c.id === leadId);
+        }
+        return collection[0] || null;
+      }, [collection, leadId]);
+
+      useEffect(() => {
+        if (!lead && collection.length > 0) {
+          setLeadId(collection[0].id);
+        }
+      }, [collection]);
+
+      const pushLog = useCallback((msg) => setLog(prev => [msg, ...prev].slice(0, 80)), []);
+
+      const refreshMarket = useCallback(() => {
+        setMarketPreview(ensureSkin({
+          id: crypto.randomUUID(),
+          name: RANDOM_NAMES[rnd(RANDOM_NAMES.length)],
+          type: RANDOM_TYPES[rnd(RANDOM_TYPES.length)],
+          power: 130 + rnd(70),
+          hp: 130 + rnd(70),
+          hpMax: 130 + rnd(70),
+          tier: 0,
+          desc: 'A rare specimen sourced through the market.',
+        }));
+      }, []);
+
+      const startSafari = (location) => {
+        const { map, revealed, playerPos } = generateMap();
+        setGameState({ inSafari: true, location, map, revealed, playerPos });
+        pushLog(`Departed to the ${location} safari.`);
+        setModal(null);
+      };
+
+      const exitSafari = (message, xpGain = 80) => {
+        setGameState(gs => ({ ...gs, inSafari: false }));
+        setPlayer(p => ({ ...p, xp: p.xp + xpGain }));
+        if (lead) {
+          setCollection(col => col.map(c => c.id === lead.id ? { ...c, hp: c.hpMax } : c));
+          pushLog(`Lead ${lead.name} fully healed in the lab.`);
+        }
+        pushLog(message);
+      };
+
+      const updateLeadHp = (hp) => {
+        setCollection(col => col.map(c => c.id === lead.id ? { ...c, hp } : c));
+      };
+
+      const movePlayer = (dx, dy) => {
+        setGameState(gs => {
+          if (!gs.inSafari) return gs;
+          const { map, playerPos } = gs;
+          const nx = playerPos.x + dx;
+          const ny = playerPos.y + dy;
+          if (nx < 0 || nx >= MAP_W || ny < 0 || ny >= MAP_H || map[ny][nx] === TILE_TYPE.WALL) {
+            return gs;
+          }
+          const tile = map[ny][nx];
+          const newMap = map.map(row => [...row]);
+          newMap[ny][nx] = TILE_TYPE.FLOOR;
+          const newState = { ...gs, playerPos: { x: nx, y: ny }, map: newMap };
+          if (tile === TILE_TYPE.QBIT) {
+            setPlayer(p => ({ ...p, qbits: p.qbits + 5 }));
+            pushLog('Recovered 5 Q-bits from a cache.');
+          } else if (tile === TILE_TYPE.EXIT) {
+            pushLog('You located a transfer gate. Returning to the lab.');
+            exitSafari('Safari cleared! Rewards banked.', 120);
+          } else if (tile === TILE_TYPE.ENEMY) {
+            if (gs.revealed[ny][nx]) {
+              if (lead && lead.hp > 0) {
+                startBattle(randomCritter(gs.location));
+              } else {
+                pushLog('Lead is too weak to battle. Heal up first.');
+              }
+            } else {
+              pushLog('Sensor pinged a hidden critter. Use the Gizmo to reveal it.');
+            }
+          }
+          return newState;
+        });
+      };
+
+      const keyHandler = useCallback((event) => {
+        const key = event.key.toLowerCase();
+        const mapping = {
+          'arrowup': [0, -1], 'w': [0, -1],
+          'arrowdown': [0, 1], 's': [0, 1],
+          'arrowleft': [-1, 0], 'a': [-1, 0],
+          'arrowright': [1, 0], 'd': [1, 0],
+        };
+        const move = mapping[key];
+        if (move) {
+          event.preventDefault();
+          movePlayer(...move);
+        }
+        if (key === 'e') {
+          doScan();
+        }
+      }, [gameState, player, lead]);
+
+      useEffect(() => {
+        window.addEventListener('keydown', keyHandler);
+        return () => window.removeEventListener('keydown', keyHandler);
+      }, [keyHandler]);
+
+      const doScan = () => {
+        if (!gameState.inSafari || player.qbits < SCAN_COST) {
+          pushLog('Scan failed. Insufficient Q-bits or not in safari.');
+          return;
+        }
+        setPlayer(p => ({ ...p, qbits: p.qbits - SCAN_COST }));
+        let found = 0;
+        const newRevealed = gameState.revealed.map(row => [...row]);
+        for (let dy = -SCAN_RADIUS; dy <= SCAN_RADIUS; dy++) {
+          for (let dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
+            const x = gameState.playerPos.x + dx;
+            const y = gameState.playerPos.y + dy;
+            if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H && gameState.map[y][x] === TILE_TYPE.ENEMY && !newRevealed[y][x]) {
+              newRevealed[y][x] = true;
+              found++;
+            }
+          }
+        }
+        setGameState(gs => ({ ...gs, revealed: newRevealed }));
+        setLastScan(Date.now());
+        pushLog(`Gizmo scan detected ${found} signature${found === 1 ? '' : 's'}.`);
+      };
+
+      const onSetLead = (id) => {
+        setLeadId(id);
+        const critter = collection.find(c => c.id === id);
+        if (critter) {
+          pushLog(`${critter.name} is now leading your party.`);
+        }
+      };
+
+      const onSplice = (a, b, invest) => {
+        if (!a || !b || a.id === b.id) return;
+        if (player.qbits < SPLICING_COST + invest) {
+          pushLog('Not enough Q-bits to splice.');
+          return;
+        }
+        const child = makeChild(a, b, invest);
+        setCollection(col => col.filter(c => c.id !== a.id && c.id !== b.id).concat(child));
+        setPlayer(p => ({ ...p, qbits: p.qbits - (SPLICING_COST + invest) }));
+        pushLog(`Spliced ${a.name} + ${b.name}. Resulting specimen: ${child.name} (P${child.power}).`);
+        setLeadId(child.id);
+        setModal(null);
+      };
+
+      const onBuyRare = (specimen) => {
+        if (player.qbits < MARKET_COST) return;
+        setPlayer(p => ({ ...p, qbits: p.qbits - MARKET_COST }));
+        setCollection(col => [...col, { ...specimen, id: crypto.randomUUID(), hp: specimen.hpMax }]);
+        pushLog(`Purchased rare specimen ${specimen.name} from the market.`);
+        refreshMarket();
+      };
+
+      const startBattle = (wild) => {
+        const leadCritter = collection.find(c => c.id === lead.id);
+        if (!leadCritter) return;
+        const battle = {
+          lead: { ...leadCritter },
+          wild: { ...wild, hp: Math.round(wild.power * 1.5), hpMax: Math.round(wild.power * 1.5) },
+          message: `A wild ${wild.name} (${wild.type}) appears!`,
+        };
+        setBattleState(battle);
+        setModal('battle');
+      };
+
+      const resolveAttack = () => {
+        setBattleState(prev => {
+          if (!prev) return prev;
+          const leadPower = prev.lead.power;
+          const damage = Math.max(20, Math.round(leadPower * (0.25 + Math.random() * 0.4)));
+          const enemyDamage = Math.max(10, Math.round(prev.wild.power * (0.2 + Math.random() * 0.3)));
+          const wildHp = Math.max(0, prev.wild.hp - damage);
+          const leadHp = Math.max(0, prev.lead.hp - (wildHp <= 0 ? 0 : enemyDamage));
+          let message = `You struck ${prev.wild.name} for ${damage} damage.`;
+          if (wildHp <= 0) {
+            message += ` ${prev.wild.name} was defeated!`;
+            captureCritter(prev.wild);
+            setModal(null);
+            updateLeadHp(Math.min(prev.lead.hpMax, leadHp));
+            return { ...prev, wild: { ...prev.wild, hp: 0 }, lead: { ...prev.lead, hp: leadHp }, message };
+          }
+          if (leadHp <= 0) {
+            message += ` ${prev.wild.name} countered for ${enemyDamage}. Your lead fainted!`;
+            updateLeadHp(0);
+            setModal(null);
+            pushLog('Lead fainted. Return to the lab or heal on level-up.');
+            return { ...prev, wild: { ...prev.wild, hp: wildHp }, lead: { ...prev.lead, hp: 0 }, message };
+          }
+          message += ` ${prev.wild.name} retaliated for ${enemyDamage}.`;
+          updateLeadHp(leadHp);
+          return { ...prev, wild: { ...prev.wild, hp: wildHp }, lead: { ...prev.lead, hp: leadHp }, message };
+        });
+      };
+
+      const attemptEscape = () => {
+        setBattleState(prev => {
+          if (!prev) return prev;
+          if (Math.random() < 0.6) {
+            pushLog('You successfully escaped the encounter.');
+            setModal(null);
+            return { ...prev, message: 'You escaped!' };
+          }
+          const enemyDamage = Math.max(8, Math.round(prev.wild.power * 0.25));
+          const leadHp = Math.max(0, prev.lead.hp - enemyDamage);
+          updateLeadHp(leadHp);
+          let message = `Escape failed! ${prev.wild.name} strikes for ${enemyDamage}.`;
+          if (leadHp <= 0) {
+            message += ' Your lead fainted!';
+            setModal(null);
+            pushLog('Lead fainted while trying to run.');
+          }
+          return { ...prev, lead: { ...prev.lead, hp: leadHp }, message };
+        });
+      };
+
+      const captureCritter = (wild) => {
+        const captured = ensureSkin({
+          id: crypto.randomUUID(),
+          name: wild.name,
+          type: wild.type,
+          power: wild.power,
+          hp: wild.power,
+          hpMax: wild.power,
+          tier: 0,
+          desc: 'Captured from the wild safari.',
+        });
+        setCollection(col => [...col, captured]);
+        setPlayer(p => ({ ...p, qbits: p.qbits + 10, xp: p.xp + 90 }));
+        pushLog(`Captured ${wild.name}! Earned 10 Q-bits and 90 XP.`);
+      };
+
+      return (
+        <div className="h-screen w-screen p-2 lg:p-4 flex flex-col lg:flex-row gap-3 lg:gap-4">
+          <div className="w-full lg:w-[320px] flex-shrink-0">
+            <PlayerHUD player={player} lead={lead} collectionSize={collection.length} />
+          </div>
+          <div className="flex-1 min-h-0 card p-2 lg:p-3 relative">
+            <ThreeCanvas gameState={gameState} />
+            <TouchControls onMove={movePlayer} />
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-2">
+              {gameState.inSafari ? (
+                <button className="btn btn-ghost" onClick={() => exitSafari('Retreated to the lab.', 40)}>Abort Safari</button>
+              ) : (
+                <>
+                  <button className="btn btn-primary" onClick={() => setModal('safari')}>Open Safari</button>
+                  <button className="btn btn-ghost" onClick={() => setModal('collection')}>Collection & Lab</button>
+                  <button className="btn btn-ghost" onClick={() => { refreshMarket(); setModal('market'); }}>Market</button>
+                </>
+              )}
+            </div>
+            {!gameState.inSafari && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-[var(--muted)] text-center px-3 py-2 bg-black/30 rounded-full">
+                Move with WASD/Arrow keys. Tap Gizmo with E.
+              </div>
+            )}
+          </div>
+          <div className="w-full lg:w-[320px] flex-shrink-0 lg:h-full overflow-y-auto">
+            {gameState.inSafari ? (
+              <GizmoScanner qbits={player.qbits} onScan={doScan} map={gameState.map} revealed={gameState.revealed} playerPos={gameState.playerPos} lastScan={lastScan} />
+            ) : (
+              <LogPanel log={log} />
+            )}
+          </div>
+
+          {modal === 'safari' && (
+            <SafariSelectModal level={levelFromXP(player.xp)} onPick={startSafari} onClose={() => setModal(null)} />
+          )}
+          {modal === 'collection' && (
+            <CollectionModal
+              collection={collection}
+              leadId={lead?.id || null}
+              onSetLead={onSetLead}
+              onSplice={onSplice}
+              player={player}
+              onClose={() => setModal(null)}
+            />
+          )}
+          {modal === 'market' && (
+            <MarketModal player={player} onBuy={onBuyRare} preview={marketPreview} onClose={() => setModal(null)} />
+          )}
+          {modal === 'battle' && battleState && (
+            <BattleModal battle={battleState} onAttack={resolveAttack} onRun={attemptEscape} onClose={() => setModal(null)} />
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
