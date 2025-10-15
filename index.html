@@ -482,6 +482,10 @@
       useEffect(() => {
         const { scene, renderer, camera, playerMesh, buildSafariScene, buildLabScene } = cacheRef.current;
         if (!scene || !renderer || !camera) return;
+        if (cacheRef.current.frameId) {
+          cancelAnimationFrame(cacheRef.current.frameId);
+          cacheRef.current.frameId = null;
+        }
         if (gameState.inSafari) {
           buildSafariScene(gameState);
         } else {
@@ -508,7 +512,14 @@
           renderer.render(scene, camera);
           cacheRef.current.frameId = requestAnimationFrame(animate);
         };
-        animate();
+        cacheRef.current.frameId = requestAnimationFrame(animate);
+
+        return () => {
+          if (cacheRef.current.frameId) {
+            cancelAnimationFrame(cacheRef.current.frameId);
+            cacheRef.current.frameId = null;
+          }
+        };
       }, [gameState]);
 
       return <div ref={mountRef} className="w-full h-full" />;
@@ -950,8 +961,20 @@
             return gs;
           }
           const tile = map[ny][nx];
+          if (tile === TILE_TYPE.ENEMY) {
+            if (!gs.revealed[ny][nx]) {
+              pushLog('Sensor pinged a hidden critter. Use the Gizmo to reveal it.');
+              return gs;
+            }
+            if (!lead || lead.hp <= 0) {
+              pushLog('Lead is too weak to battle. Heal up first.');
+              return gs;
+            }
+          }
           const newMap = map.map(row => [...row]);
-          newMap[ny][nx] = TILE_TYPE.FLOOR;
+          if (tile === TILE_TYPE.QBIT || tile === TILE_TYPE.ENEMY) {
+            newMap[ny][nx] = TILE_TYPE.FLOOR;
+          }
           const newState = { ...gs, playerPos: { x: nx, y: ny }, map: newMap };
           if (tile === TILE_TYPE.QBIT) {
             setPlayer(p => ({ ...p, qbits: p.qbits + 5 }));
@@ -960,15 +983,7 @@
             pushLog('You located a transfer gate. Returning to the lab.');
             exitSafari('Safari cleared! Rewards banked.', 120);
           } else if (tile === TILE_TYPE.ENEMY) {
-            if (gs.revealed[ny][nx]) {
-              if (lead && lead.hp > 0) {
-                startBattle(randomCritter(gs.location));
-              } else {
-                pushLog('Lead is too weak to battle. Heal up first.');
-              }
-            } else {
-              pushLog('Sensor pinged a hidden critter. Use the Gizmo to reveal it.');
-            }
+            startBattle(randomCritter(gs.location));
           }
           return newState;
         });
